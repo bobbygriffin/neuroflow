@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, current_app
 from flask_restful import Resource, Api, reqparse
 from flask_bcrypt import Bcrypt, generate_password_hash, check_password_hash
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 import sqlite3
 import datetime
 
@@ -31,24 +31,36 @@ class AppModel(Resource):
 
 class Mood(AppModel):
 	''' Serves as Model for the Mood table and all /mood endpoints'''
+	@jwt_required
 	def get(self):
 		''' Handle GET requests on the /mood endpoint. 
-			For now there is just a single record in the DB and we return that.
+			Returns last 10 moods for the logged in user
 		'''
-		self.cur.execute('SELECT id,user_id,mood,created FROM moods ORDER BY created DESC LIMIT 1')
+		user_id = get_jwt_identity()
+		self.cur.execute('SELECT id,mood,created FROM moods WHERE user_id = ? ORDER BY created DESC, id DESC LIMIT 10', [user_id])
 		rows = self.cur.fetchall()
 		results = {}
 		for row in rows:
-			results.update({row[0]: {'user_id': row[1], 'mood': row[2], 'created': row[3]}})
+			results.update({row[0]: {'mood': row[1], 'created': row[2]}})
 		return jsonify(results)
 		
+	@jwt_required
 	def post(self):
 		''' Handle POST requests on the /mood endpoint.
-			Update the single mood in the DB with args['mood'] that's been POSTed
+			INSERT the mood that was POSTed by the authenticated user
 		'''
+		user_id = get_jwt_identity()
 		args = parser.parse_args()
-		self.cur.execute('UPDATE moods SET mood = ?', [args['mood']])
+		
+		# Get current date in YYYY-MM-DD format
+		now = datetime.datetime.now()
+		today = now.strftime("%Y-%m-%d")
+		
+		# Insert new mood into the database
+		self.cur.execute('INSERT INTO moods (user_id, mood, created) VALUES (?, ?, ?)', [user_id, args['mood'], today])
 		self.con.commit()
+		
+		# Return the same as a get request
 		return self.get()
 		
 class Auth(AppModel):
